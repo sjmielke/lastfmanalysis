@@ -6,13 +6,15 @@ import Data.Aeson.Types (parse)
 import Control.Applicative
 import Data.Function (on)
 import Data.Ord (comparing)
-import Data.List (deleteFirstsBy, nubBy, groupBy, sortBy)
+import Data.List (genericLength, deleteFirstsBy, nubBy, groupBy, sortBy, group, sort)
 import Data.Text (Text, pack)
 import Data.HashMap.Strict (fromList)
 import GHC.Int (Int64)
 
 import qualified Network.Lastfm as LFM
 import qualified Network.Lastfm.User as LFM.User
+
+import qualified Database.SQLite as DB
 
 data Scrobble = Scrobble { timestamp :: Int
                          , title :: String
@@ -51,8 +53,37 @@ getScrobblePage con userName apiKey page = do
                                (Success sl) -> sl :: [Scrobble]
                                (Error e) -> error e
         
-        -- Remove the "mow playing" entry marked with 42 above
+        -- Remove the "now playing" entry marked with 42 above
         return $ filter ((/=42) . timestamp) scrobbleList
+
+getTrackLength :: DB.SQLiteHandle -> Scrobble -> IO (Maybe Int)
+getTrackLength conn s@(Scrobble _ t ar al) = do
+        result <- DB.execParamStatement conn
+            ( "SELECT length/1000000000 FROM songs WHERE " ++
+              "title=:title AND " ++
+              "artist=:artist AND " ++
+              "album=:album;" )
+            [ (":title", DB.Text t)
+            , (":artist", DB.Text ar)
+            , (":album", DB.Text al) ]
+            :: IO (Either String [[DB.Row DB.Value]])
+        case result of
+            Left err -> error $ show s ++ " made the database sad: " ++ err
+            Right [rows] -> case rows of
+                [[(_, DB.Int l)]] -> return $ Just $ fromIntegral l
+                l -> -- Perhaps its just clementines history:
+                     let differentlengths = map head
+                                          $ group
+                                          $ sort
+                                          $ map (\[(_, DB.Int i)] -> i) l in
+                     case differentlengths of
+                        [] -> -- (putStr $ "Not found: " ++ show s) >>
+                              return Nothing
+                        [l] -> return $ Just $ fromIntegral l
+                        ls -> -- They seem to be indistinguishable,
+                              -- so let's just use average over the different lengths.
+                              -- This case seems to be rare enough anyway (~0.25%).
+                              return $ Just $ fromIntegral $ (sum ls) `div` (genericLength ls)
 
 main = do {- Retrieving data takes far too long, so...
           putStr "User name: "
@@ -75,8 +106,8 @@ main = do {- Retrieving data takes far too long, so...
                                                 (nubBy sameTrack newScrobbles)
                                                 (nubBy sameTrack oldScrobbles)
           
-          putStrLn $ "Unique track count: " ++ show (length $ nubBy sameTrack scrobbleList)
-          putStrLn $ "Unique new tracks: " ++ show (length realNewScrobbles)
+          -- putStrLn $ "Unique track count: " ++ show (length $ nubBy sameTrack scrobbleList)
+          -- putStrLn $ "Unique new tracks: " ++ show (length realNewScrobbles)
           
           let partitionWithAttribute accessor = groupBy ((==) `on` accessor)
                                               . sortBy (comparing accessor)
@@ -88,7 +119,17 @@ main = do {- Retrieving data takes far too long, so...
           let albums :: [[Scrobble]]
               albums = partitionWithAttribute album realNewScrobbles
           
-          writeFile "/home/sjm/downloads/realnewtracks" $ printBeautifully $ map (\a -> (album $ head a, map title a)) albums
+          -- writeFile "/home/sjm/downloads/realnewtracks" $ printBeautifully $ map (\a -> (album $ head a, map title a)) albums
+          
+          conn <- DB.openReadonlyConnection "/home/sjm/.config/Clementine/clementine.db"
+          
+          sum <- mapM (getTrackLength conn) newScrobbles
+          print $ length $ filter (== Nothing) sum
+          print $ length $ filter (/= Nothing) sum
+          
+          getTrackLength conn (Scrobble {timestamp = 1388055375, title = "Gabriel's Oboe", artist = "Ennio Morricone", album = "The Mission"}) >>= print
+          
+          DB.closeConnection conn
 
 printBeautifully :: [(String, [String])] -> String
 printBeautifully = concatMap printSingle
