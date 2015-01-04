@@ -7,6 +7,7 @@ import Control.Applicative
 import Data.Function (on)
 import Data.Ord (comparing)
 import Data.List (genericLength, deleteFirstsBy, nubBy, groupBy, sortBy, group, sort)
+import Data.String (fromString)
 import Data.Text (Text, pack)
 import Data.HashMap.Strict (fromList)
 import GHC.Int (Int64)
@@ -14,7 +15,7 @@ import GHC.Int (Int64)
 import qualified Network.Lastfm as LFM
 import qualified Network.Lastfm.User as LFM.User
 
-import qualified Database.SQLite as DB
+import qualified Database.SQLite.Simple as SQL
 
 data Scrobble = Scrobble { timestamp :: Int
                          , title :: String
@@ -56,45 +57,53 @@ getScrobblePage con userName apiKey page = do
         -- Remove the "now playing" entry marked with 42 above
         return $ filter ((/=42) . timestamp) scrobbleList
 
-getTrackLength :: DB.SQLiteHandle -> Scrobble -> IO (Maybe Int)
-getTrackLength conn s@(Scrobble _ t ar al) = getTrackLengthComparing (True, True)
+getTrackLength :: SQL.Connection -> Scrobble -> IO Int
+getTrackLength clemDBConn s = getTrackLengthFromClementineDB clemDBConn s >>=
+                              \x -> case x of
+                                        Just l -> return l
+                                        Nothing -> return 5
+
+getTrackLengthFromClementineDB :: SQL.Connection -> Scrobble -> IO (Maybe Int)
+getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
+    getTrackLengthComparing (True, True)
     where getTrackLengthComparing (compAr, compAl) = do
-            result <- DB.execParamStatement conn
-                ( "SELECT length/1000000000 FROM songs WHERE " ++
-                  "title=:title COLLATE NOCASE AND " ++
+            let query = fromString $
+                  "SELECT length/1000000000 FROM songs WHERE " ++
                   (if compAr then "artist=:artist COLLATE NOCASE AND " else "") ++
-                  (if compAl then "album=:album COLLATE NOCASE AND " else "") ++
-                  "1=1;")
-                [ (":title", DB.Text t)
-                , (":artist", DB.Text ar)
-                , (":album", DB.Text al) ]
-                :: IO (Either String [[DB.Row DB.Value]])
-            case result of
-                Left err -> error $ show s ++ " made the database sad: " ++ err
-                Right [rows] -> case rows of
-                    [[(_, DB.Int l)]] -> return $ Just $ fromIntegral l
-                    l -> -- Perhaps its just clementines history making duplicates:
-                         let differentlengths = map head
-                                              $ group
-                                              $ sort
-                                              $ map (\[(_, DB.Int i)] -> i) l in
-                         case differentlengths of
-                            [] -> do -- Lastfm corrects some artists, so try ignoring them.
-                                     permissiveLength <- case (compAr, compAl) of
-                                       (True, True) -> getTrackLengthComparing (False, True)
-                                       (False, True) -> return Nothing
-                                     case permissiveLength of
-                                       Nothing -> do putStrLn $ "Not found: " ++ show s
-                                                     return Nothing
-                                       Just l -> do -- putStrLn $ "Found " ++ show l ++ " for " ++ show s
-                                                    return permissiveLength
-                            [l] -> return $ Just $ fromIntegral l
-                            ls -> -- They seem to be indistinguishable,
-                                  -- so let's just use average over the different lengths.
-                                  -- This case seems to be rare enough anyway (~0.25%).
-                                  return $ Just
-                                         $ fromIntegral
-                                         $ (sum ls) `div` (genericLength ls)
+                  (if compAl then
+                      "(album=:album COLLATE NOCASE OR ((:album LIKE (album || '%') OR album LIKE (:album || '%')) AND (LENGTH(album) > 5) AND (LENGTH(:album) > 5))) AND "
+                      else "") ++
+                  "title=:title COLLATE NOCASE;"
+            results <- SQL.queryNamed clemDBConn query $
+                (if compAr then ((":artist" SQL.:= ar):) else id) $
+                (if compAl then ((":album" SQL.:= al):) else id) $
+                [":title" SQL.:= t]
+                :: IO [SQL.Only Int]
+            case results of
+                [l] -> return $ Just $ SQL.fromOnly l
+                ls -> -- Perhaps its just clementines history making duplicates:
+                     let differentlengths = map head
+                                          $ group
+                                          $ sort
+                                          $ map SQL.fromOnly ls in
+                     case differentlengths of
+                        [] -> do -- Lastfm corrects some artists, so try ignoring them.
+                                 permissiveLength <- case (compAr, compAl) of
+                                   (True, True) -> getTrackLengthComparing (False, True)
+                                   (False, True) -> getTrackLengthComparing (True, False)
+                                   (True, False) -> (putStrLn $ "Not found: " ++ show s) >>
+                                                    return Nothing
+                                 case permissiveLength of
+                                   Nothing -> return Nothing
+                                   Just l -> do -- putStrLn $ "Found " ++ show l ++ " for " ++ show s
+                                                return permissiveLength
+                        [l] -> return $ Just $ fromIntegral l
+                        ls -> -- They seem to be indistinguishable,
+                              -- so let's just use average over the different lengths.
+                              -- This case seems to be rare enough anyway (~0.25%).
+                              return $ Just
+                                     $ fromIntegral
+                                     $ (sum ls) `div` (genericLength ls) -- -}
 
 main = do {- Retrieving data takes far too long, so...
           putStr "User name: "
@@ -132,20 +141,15 @@ main = do {- Retrieving data takes far too long, so...
           
           -- writeFile "/home/sjm/downloads/realnewtracks" $ printBeautifully $ map (\a -> (album $ head a, map title a)) albums
           
-          conn <- DB.openReadonlyConnection "/home/sjm/.config/Clementine/clementine.db"
+          conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
-          -- sum <- mapM (getTrackLength conn) newScrobbles
-          -- print $ length $ filter (== Nothing) sum
-          -- print $ length $ filter (/= Nothing) sum
+          allLengths <- mapM (getTrackLength conn) newScrobbles
+          print $ sum allLengths
+          -- TODO: Avg? Median? Does this make sense?
           
-          -- getTrackLength conn (Scrobble {timestamp = 42, title = "Jóga", artist = "Björk", album = "Homogenic"}) >>= print
+          -- getTrackLength conn (Scrobble {timestamp = 42, title = "One", artist = "Lamb", album = "What Sound Limited Edition"}) >>= print
           
-          let q = "select \"ö\" from songs where album='Homogenic';" :: String
-          Right result <- DB.execStatement conn q :: IO (Either String [[DB.Row DB.Value]])
-          let (DB.Text t) = snd . head . head . head $ result
-          putStrLn t
-          
-          DB.closeConnection conn
+          SQL.close conn
 
 printBeautifully :: [(String, [String])] -> String
 printBeautifully = concatMap printSingle
