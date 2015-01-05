@@ -61,7 +61,7 @@ getTrackLength :: SQL.Connection -> Scrobble -> IO Int
 getTrackLength clemDBConn s = getTrackLengthFromClementineDB clemDBConn s >>=
                               \x -> case x of
                                         Just l -> return l
-                                        Nothing -> return 5
+                                        Nothing -> return (4*60) -- Reasonable default song length?
 
 getTrackLengthFromClementineDB :: SQL.Connection -> Scrobble -> IO (Maybe Int)
 getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
@@ -143,11 +143,21 @@ main = do {- Retrieving data takes far too long, so...
           
           conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
-          allLengths <- mapM (getTrackLength conn) newScrobbles
-          print $ sum allLengths
-          -- TODO: Avg? Median? Does this make sense?
+          scores <- mapM (\ss -> do
+            allLengths <- mapM (getTrackLength conn) ss
+            return (artist $ head ss, sum allLengths ) -- `div` length allLengths)
+            )
+            (partitionWithAttribute artist scrobbleList)
           
-          -- getTrackLength conn (Scrobble {timestamp = 42, title = "One", artist = "Lamb", album = "What Sound Limited Edition"}) >>= print
+          mapM_ (\(a, s) -> putStrLn $  show (s `div` 3600)
+                                     ++ ":"
+                                     ++ show ((s `mod` 3600) `div` 60)
+                                     ++ ":"
+                                     ++ show ((s `mod` 3600) `mod` 60) -- I know the first mod is useless.
+                                     ++ " (" ++ a ++ ")" )
+              $ sortBy (comparing snd) scores
+          
+          -- getTrackLength conn (Scrobble {timestamp = 42, title = "Mensch", artist = "Herbert Grönemeyer", album = "Mensch"}) >>= print
           
           SQL.close conn
 
