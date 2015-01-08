@@ -61,6 +61,39 @@ getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
                                      $ fromIntegral
                                      $ (sum ls) `div` (genericLength ls)
 
+getMonthLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
+getMonthLengths conn scrobbleList = do
+          let firstTimestamp = timestamp $ last scrobbleList
+          
+          let (firstYear, firstMonth, firstDay) = toGregorian
+                                                $ utctDay
+                                                $ posixSecondsToUTCTime
+                                                $ fromIntegral
+                                                $ firstTimestamp
+          
+          now <- fmap round getPOSIXTime
+          let listOfMonthStarts = takeWhile (< now)
+                                $ concatMap (\year -> [ round
+                                                      $ utcTimeToPOSIXSeconds
+                                                      $ UTCTime (fromGregorian year month 1) 0
+                                                      | month <- [1..12]
+                                                      , (year, month) >= (firstYear, firstMonth)
+                                                      ] )
+                                            [firstYear, firstYear + 1 ..]
+          
+          let countAllScrobblesBetween start end = do
+                sumOfScrobbles <- fmap sum
+                                $ mapM (getTrackLength conn)
+                                $ takeWhile ((>= start) . timestamp)
+                                $ dropWhile ((> end) . timestamp)
+                                $ scrobbleList
+                return (start, end, sumOfScrobbles)
+          
+          let intervals = zip (firstTimestamp : tail listOfMonthStarts)
+                              (tail listOfMonthStarts ++ [now])
+          
+          mapM (uncurry countAllScrobblesBetween) intervals
+
 main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
           scrobbleList <- scrobbleList
@@ -82,43 +115,18 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
               $ sortBy (comparing snd) scores
           -- --}
           
-          let firstTimestamp = timestamp $ last scrobbleList
           
-          let (firstYear, firstMonth, firstDay) = toGregorian
-                                                $ utctDay
-                                                $ posixSecondsToUTCTime
-                                                $ fromIntegral
-                                                $ firstTimestamp
           
-          now <- fmap round getPOSIXTime
-          let listOfMonthStarts = takeWhile (< now)
-                                $ concatMap (\year -> [ round
-                                                      $ utcTimeToPOSIXSeconds
-                                                      $ UTCTime (fromGregorian year month 1) 0
-                                                      | month <- [1..12]
-                                                      , (year, month) >= (firstYear, firstMonth)
-                                                      ] )
-                                            [firstYear, firstYear + 1 ..]
+          let getText (start, end, allseconds) = let intToTimeString = show
+                                                                     . posixSecondsToUTCTime
+                                                                     . fromIntegral
+                                                 in putStrLn $  (intToTimeString start)
+                                                             ++ " - "
+                                                             ++ (intToTimeString end)
+                                                             ++ " -> "
+                                                             ++ (show $ allseconds `div` 3600)
           
-          let countAllScrobblesBetween start end = fmap sum
-                                                 $ mapM (getTrackLength conn)
-                                                 $ takeWhile ((>= start) . timestamp)
-                                                 $ dropWhile ((> end) . timestamp)
-                                                 $ scrobbleList
-          
-          let intervals = zip (firstTimestamp : tail listOfMonthStarts)
-                              (tail listOfMonthStarts ++ [now])
-          
-          let getText (start, end) = do allseconds <- countAllScrobblesBetween start end
-                                        let intToTimeString = show
-                                                            . posixSecondsToUTCTime
-                                                            . fromIntegral
-                                        putStrLn $  (intToTimeString start)
-                                                 ++ " - "
-                                                 ++ (intToTimeString end)
-                                                 ++ " -> "
-                                                 ++ (show $ allseconds `div` 3600)
-          
-          mapM_ getText intervals
+          lengths <- getMonthLengths conn scrobbleList
+          mapM_ getText lengths
           
           SQL.close conn
