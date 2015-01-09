@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Lengths where
+module Lengths (
+      getTrackLength
+    , getMonthLengths
+    , getSeasonLengths
+    ) where
 
 import LastFM
 
@@ -120,40 +124,3 @@ getCalendarTupleFromTimestamp = toGregorian
                               . utctDay
                               . posixSecondsToUTCTime
                               . fromIntegral
-
-main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
-          
-          scrobbleList <- scrobbleList
-          
-          let ppSeconds s =  show (s `div` 3600)
-                          ++ ":"
-                          ++ show ((s `mod` 3600) `div` 60)
-                          ++ ":"
-                          ++ show ((s `mod` 3600) `mod` 60) -- I know the first mod is useless.
-          
-          {-
-          scores <- mapM (\ss -> do
-            allLengths <- mapM (getTrackLength conn) ss
-            return (artist $ head ss, sum allLengths ) -- `div` length allLengths)
-            )
-            (partitionWithAttribute artist scrobbleList)
-          
-          mapM_ (\(a, s) -> putStrLn $ ppSeconds s ++ " (" ++ a ++ ")" )
-              $ sortBy (comparing snd) scores
-          -- --}
-          
-          
-          
-          let getText (start, end, allseconds) = let intToTimeString = show
-                                                                     . posixSecondsToUTCTime
-                                                                     . fromIntegral
-                                                 in putStrLn $  (intToTimeString start)
-                                                             ++ " - "
-                                                             ++ (intToTimeString end)
-                                                             ++ " -> "
-                                                             ++ (show $ allseconds `div` 3600)
-          
-          lengths <- getSeasonLengths conn scrobbleList
-          mapM_ getText lengths
-          
-          SQL.close conn
