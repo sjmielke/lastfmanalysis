@@ -61,25 +61,13 @@ getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
                                      $ fromIntegral
                                      $ (sum ls) `div` (genericLength ls)
 
-getMonthLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
-getMonthLengths conn scrobbleList = do
-          let firstTimestamp = timestamp $ last scrobbleList
-          
-          let (firstYear, firstMonth, firstDay) = toGregorian
-                                                $ utctDay
-                                                $ posixSecondsToUTCTime
-                                                $ fromIntegral
-                                                $ firstTimestamp
+getLengthsPerFrom :: (Int -> Int) -> ([Scrobble] -> Int) -> SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
+getLengthsPerFrom nextFunc firstFunc conn scrobbleList = do
+          let firstTimestamp = firstFunc scrobbleList
           
           now <- fmap round getPOSIXTime
-          let listOfMonthStarts = takeWhile (< now)
-                                $ concatMap (\year -> [ round
-                                                      $ utcTimeToPOSIXSeconds
-                                                      $ UTCTime (fromGregorian year month 1) 0
-                                                      | month <- [1..12]
-                                                      , (year, month) >= (firstYear, firstMonth)
-                                                      ] )
-                                            [firstYear, firstYear + 1 ..]
+          let listOfIntervalStarts = takeWhile (< now)
+                                $ iterate nextFunc firstTimestamp
           
           let countAllScrobblesBetween start end = do
                 sumOfScrobbles <- fmap sum
@@ -89,10 +77,49 @@ getMonthLengths conn scrobbleList = do
                                 $ scrobbleList
                 return (start, end, sumOfScrobbles)
           
-          let intervals = zip (firstTimestamp : tail listOfMonthStarts)
-                              (tail listOfMonthStarts ++ [now])
+          let intervals = zip (listOfIntervalStarts)
+                              (tail listOfIntervalStarts ++ [now])
           
           mapM (uncurry countAllScrobblesBetween) intervals
+
+getMonthLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
+getMonthLengths = getLengthsPerFrom nextMonth (timestamp . last)
+    where nextMonth oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
+                               in   getTimestampFromCalendarTuple
+                                  $ if m == 12
+                                    then (y+1, 1, 1)
+                                    else (y, m+1, 1)
+
+getSeasonLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
+getSeasonLengths = getLengthsPerFrom nextSeason firstInSeason
+    where nextSeason oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
+                                    thisYearsList = dropWhile (<= (m, d)) seasonDates
+                                in if thisYearsList /= []
+                                   then let (m, d) = head thisYearsList
+                                        in getTimestampFromCalendarTuple (y, m, d)
+                                   else let (m, d) = head seasonDates
+                                        in getTimestampFromCalendarTuple (y+1, m, d)
+          firstInSeason sl = let (y, m, d) = getCalendarTupleFromTimestamp
+                                           $ timestamp
+                                           $ last sl
+                                 thisYearsList = takeWhile (<= (m, d)) seasonDates
+                             in if thisYearsList /= []
+                                then let (m, d) = last thisYearsList
+                                     in getTimestampFromCalendarTuple (y, m, d)
+                                else let (m, d) = last seasonDates
+                                     in getTimestampFromCalendarTuple (y-1, m, d)
+          seasonDates = [(3, 20), (6, 21), (9, 22), (12, 21)]
+
+getTimestampFromCalendarTuple :: (Integer, Int, Int) -> Int
+getTimestampFromCalendarTuple (y, m, d) = round
+                                        $ utcTimeToPOSIXSeconds
+                                        $ UTCTime (fromGregorian y m d) 0
+
+getCalendarTupleFromTimestamp :: Int -> (Integer, Int, Int)
+getCalendarTupleFromTimestamp = toGregorian
+                              . utctDay
+                              . posixSecondsToUTCTime
+                              . fromIntegral
 
 main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
@@ -126,7 +153,7 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
                                                              ++ " -> "
                                                              ++ (show $ allseconds `div` 3600)
           
-          lengths <- getMonthLengths conn scrobbleList
+          lengths <- getSeasonLengths conn scrobbleList
           mapM_ getText lengths
           
           SQL.close conn
