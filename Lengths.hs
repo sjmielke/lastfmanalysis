@@ -65,36 +65,36 @@ getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
                                      $ fromIntegral
                                      $ (sum ls) `div` (genericLength ls)
 
-getLengthsPerFrom :: (Int -> Int) -> ([Scrobble] -> Int) -> SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
-getLengthsPerFrom nextFunc firstFunc conn scrobbleList = do
+getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> [(Scrobble, Int)] -> IO [(Int, Int, Int)]
+getLengthsPerFrom nextFunc firstFunc scrobbleList = do
           let firstTimestamp = firstFunc scrobbleList
           
           now <- fmap round getPOSIXTime
           let listOfIntervalStarts = takeWhile (< now)
-                                $ iterate nextFunc firstTimestamp
+                                   $ iterate nextFunc firstTimestamp
           
-          let countAllScrobblesBetween start end = do
-                sumOfScrobbles <- fmap sum
-                                $ mapM (getTrackLength conn)
-                                $ takeWhile ((>= start) . timestamp)
-                                $ dropWhile ((> end) . timestamp)
-                                $ scrobbleList
-                return (start, end, sumOfScrobbles)
+          let countAllScrobblesBetween start end =
+                let sumOfScrobbles = sum
+                                   $ map snd
+                                   $ takeWhile ((>= start) . timestamp . fst)
+                                   $ dropWhile ((> end) . timestamp . fst)
+                                   $ scrobbleList
+                in (start, end, sumOfScrobbles)
           
           let intervals = zip (listOfIntervalStarts)
                               (tail listOfIntervalStarts ++ [now])
           
-          mapM (uncurry countAllScrobblesBetween) intervals
+          return $ map (uncurry countAllScrobblesBetween) intervals
 
-getMonthLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
-getMonthLengths = getLengthsPerFrom nextMonth (timestamp . last)
+getMonthLengths :: [(Scrobble, Int)] -> IO [(Int, Int, Int)]
+getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
     where nextMonth oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                in   getTimestampFromCalendarTuple
                                   $ if m == 12
                                     then (y+1, 1, 1)
                                     else (y, m+1, 1)
 
-getSeasonLengths :: SQL.Connection -> [Scrobble] -> IO [(Int, Int, Int)]
+getSeasonLengths :: [(Scrobble, Int)] -> IO [(Int, Int, Int)]
 getSeasonLengths = getLengthsPerFrom nextSeason firstInSeason
     where nextSeason oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                     thisYearsList = dropWhile (<= (m, d)) seasonDates
@@ -105,6 +105,7 @@ getSeasonLengths = getLengthsPerFrom nextSeason firstInSeason
                                         in getTimestampFromCalendarTuple (y+1, m, d)
           firstInSeason sl = let (y, m, d) = getCalendarTupleFromTimestamp
                                            $ timestamp
+                                           $ fst
                                            $ last sl
                                  thisYearsList = takeWhile (<= (m, d)) seasonDates
                              in if thisYearsList /= []

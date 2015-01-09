@@ -12,7 +12,17 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
           scrobbleList <- scrobbleList
           
-          let filteredScrobbleList = filter (\x -> artist x == "Pat Metheny Group") scrobbleList
+          putStrLn "Read scrobble list."
+          
+          -- Yay for more manual caching.
+          {-
+          scrobblesWithLength <- fmap (zip scrobbleList) $ mapM (getTrackLength conn) scrobbleList
+          writeFile "/home/sjm/downloads/scrobblelistlengths" $ show scrobblesWithLength
+          -- -}
+          
+          scrobblesWithLength <- fmap read $ readFile "/home/sjm/downloads/scrobblelistlengths"
+          
+          putStrLn "Retrieved lengths."
           
           let ppSeconds s =  show (s `div` 3600)
                           ++ ":"
@@ -20,14 +30,15 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
                           ++ ":"
                           ++ show ((s `mod` 3600) `mod` 60) -- I know the first mod is useless.
           
-          scores <- mapM (\ss -> do
-            allLengths <- mapM (getTrackLength conn) ss
-            return (artist $ head ss, sum allLengths ) -- `div` length allLengths)
-            )
-            (partitionWithAttribute artist scrobbleList)
+          let filteredScrobbleList = filter (\(x, _) -> artist x == "Pat Metheny Group") scrobblesWithLength
+          
+          let scores = map (\ss -> (artist . fst $ head ss, sum $ map snd ss))
+                           (partitionWithAttribute (artist . fst) scrobblesWithLength)
           
           mapM_ (\(a, s) -> putStrLn $ ppSeconds s ++ " (" ++ a ++ ")" )
-              $ sortBy (comparing snd) scores
+              $ dropWhile ((< 3 * 3600) . snd)
+              $ sortBy (comparing snd)
+              $ scores
           
           let getText (start, end, allseconds) = let intToTimeString = show
                                                                      . posixSecondsToUTCTime
@@ -38,7 +49,7 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
                                                              ++ " -> "
                                                              ++ (show $ allseconds `div` 3600)
           
-          lengths <- getMonthLengths conn filteredScrobbleList
+          lengths <- getMonthLengths filteredScrobbleList
           mapM_ getText lengths
           
           SQL.close conn
