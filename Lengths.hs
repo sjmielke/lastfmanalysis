@@ -66,34 +66,27 @@ getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
                                      $ fromIntegral
                                      $ (sum ls) `div` (genericLength ls)
 
-applyFunctionPerFrom :: ([(Scrobble, Int)] -> Int -> Int -> a)
-                     -> (Int -> Int)
-                     -> ([(Scrobble, Int)] -> Int)
-                     -> Int
-                     -> [(Scrobble, Int)]
-                     -> [a]
-applyFunctionPerFrom f nextFunc firstFunc now scrobbleList =
-          let firstTimestamp = firstFunc scrobbleList in
-          
-          let listOfIntervalStarts = takeWhile (< now)
-                                   $ iterate nextFunc firstTimestamp in
-          
-          let intervals = zip (listOfIntervalStarts)
-                              (tail listOfIntervalStarts ++ [now]) in
-          
-          map (uncurry $ f scrobbleList) intervals
+applyFunctionPerFrom :: ([(Scrobble, Int)] -> a)   -- ^ produces result from filtered scrobbles
+                     -> (Int -> Int)               -- ^ generates next Timestamp from previous one
+                     -> ([(Scrobble, Int)] -> Int) -- ^ generates first Timestamp from all scrobbles
+                     -> Int                        -- ^ Timestamp of today (end of analysis)
+                     -> [(Scrobble, Int)]          -- ^ all scrobbles
+                     -> [((Int, Int), a)]          -- ^ list of tuples with first start and end and second the result
+applyFunctionPerFrom f nextFunc firstFunc now scrobbleList = zip intervals values
+    where firstTimestamp = firstFunc scrobbleList
+          listOfIntervalStarts = takeWhile (< now)
+                               $ iterate nextFunc firstTimestamp
+          intervals = zip (listOfIntervalStarts)
+                          (tail listOfIntervalStarts ++ [now])
+          values = map applyToFiltered intervals
+          applyToFiltered (start, end) = f
+                                       $ filter ((\x -> x >= start && x < end) . timestamp . fst)
+                                       $ scrobbleList
 
-getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
-getLengthsPerFrom = let countAllScrobblesBetween scrobbleList start end =
-                            let sumOfScrobbles = sum
-                                               $ map snd
-                                               $ takeWhile ((>= start) . timestamp . fst)
-                                               $ dropWhile ((> end) . timestamp . fst)
-                                               $ scrobbleList
-                            in (start, end, sumOfScrobbles)
-                    in applyFunctionPerFrom countAllScrobblesBetween
+getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> Int -> [(Scrobble, Int)] -> [((Int, Int), Int)]
+getLengthsPerFrom = applyFunctionPerFrom (sum . map snd)
 
-getMonthLengths :: Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
+getMonthLengths :: Int -> [(Scrobble, Int)] -> [((Int, Int), Int)]
 getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
     where nextMonth oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                in   getTimestampFromCalendarTuple
@@ -101,7 +94,7 @@ getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
                                     then (y+1, 1, 1)
                                     else (y, m+1, 1)
 
-getSeasonLengths :: Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
+getSeasonLengths :: Int -> [(Scrobble, Int)] -> [((Int, Int), Int)]
 getSeasonLengths = getLengthsPerFrom nextSeason firstInSeason
     where nextSeason oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                     thisYearsList = dropWhile (<= (m, d)) seasonDates

@@ -32,14 +32,14 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           now <- fmap round getPOSIXTime
           
           -- {-
-          let getText (start, end, allseconds) = let intToTimeString = show
-                                                                     . posixSecondsToUTCTime
-                                                                     . fromIntegral
-                                                 in putStrLn $  (intToTimeString start)
-                                                             ++ " - "
-                                                             ++ (intToTimeString end)
-                                                             ++ " -> "
-                                                             ++ (show $ allseconds `div` 3600)
+          let getText ((start, end), allseconds) = let intToTimeString = show
+                                                                       . posixSecondsToUTCTime
+                                                                       . fromIntegral
+                                                   in putStrLn $  (intToTimeString start)
+                                                               ++ " - "
+                                                               ++ (intToTimeString end)
+                                                               ++ " -> "
+                                                               ++ (show $ allseconds `div` 3600)
           let filteredScrobbleList = filter (\(x, _) -> artist x == "Pat Metheny Group") scrobblesWithLength
           let lengths = getMonthLengths now filteredScrobbleList
           mapM_ getText lengths
