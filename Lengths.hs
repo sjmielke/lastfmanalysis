@@ -4,6 +4,7 @@ module Lengths (
       getTrackLength
     , getMonthLengths
     , getSeasonLengths
+    , ppSeconds
     ) where
 
 import LastFM
@@ -13,7 +14,7 @@ import Data.Ord (comparing)
 import Data.String (fromString)
 import Data.Time.Calendar (fromGregorian, toGregorian)
 import Data.Time.Clock (UTCTime(..))
-import Data.Time.Clock.POSIX (getPOSIXTime, posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 
 import qualified Database.SQLite.Simple as SQL
 
@@ -65,28 +66,34 @@ getTrackLengthFromClementineDB clemDBConn s@(Scrobble _ t ar al) =
                                      $ fromIntegral
                                      $ (sum ls) `div` (genericLength ls)
 
-getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> [(Scrobble, Int)] -> IO [(Int, Int, Int)]
-getLengthsPerFrom nextFunc firstFunc scrobbleList = do
-          let firstTimestamp = firstFunc scrobbleList
+applyFunctionPerFrom :: ([(Scrobble, Int)] -> Int -> Int -> a)
+                     -> (Int -> Int)
+                     -> ([(Scrobble, Int)] -> Int)
+                     -> Int
+                     -> [(Scrobble, Int)]
+                     -> [a]
+applyFunctionPerFrom f nextFunc firstFunc now scrobbleList =
+          let firstTimestamp = firstFunc scrobbleList in
           
-          now <- fmap round getPOSIXTime
           let listOfIntervalStarts = takeWhile (< now)
-                                   $ iterate nextFunc firstTimestamp
-          
-          let countAllScrobblesBetween start end =
-                let sumOfScrobbles = sum
-                                   $ map snd
-                                   $ takeWhile ((>= start) . timestamp . fst)
-                                   $ dropWhile ((> end) . timestamp . fst)
-                                   $ scrobbleList
-                in (start, end, sumOfScrobbles)
+                                   $ iterate nextFunc firstTimestamp in
           
           let intervals = zip (listOfIntervalStarts)
-                              (tail listOfIntervalStarts ++ [now])
+                              (tail listOfIntervalStarts ++ [now]) in
           
-          return $ map (uncurry countAllScrobblesBetween) intervals
+          map (uncurry $ f scrobbleList) intervals
 
-getMonthLengths :: [(Scrobble, Int)] -> IO [(Int, Int, Int)]
+getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
+getLengthsPerFrom = let countAllScrobblesBetween scrobbleList start end =
+                            let sumOfScrobbles = sum
+                                               $ map snd
+                                               $ takeWhile ((>= start) . timestamp . fst)
+                                               $ dropWhile ((> end) . timestamp . fst)
+                                               $ scrobbleList
+                            in (start, end, sumOfScrobbles)
+                    in applyFunctionPerFrom countAllScrobblesBetween
+
+getMonthLengths :: Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
 getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
     where nextMonth oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                in   getTimestampFromCalendarTuple
@@ -94,7 +101,7 @@ getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
                                     then (y+1, 1, 1)
                                     else (y, m+1, 1)
 
-getSeasonLengths :: [(Scrobble, Int)] -> IO [(Int, Int, Int)]
+getSeasonLengths :: Int -> [(Scrobble, Int)] -> [(Int, Int, Int)]
 getSeasonLengths = getLengthsPerFrom nextSeason firstInSeason
     where nextSeason oldstamp = let (y, m, d) = getCalendarTupleFromTimestamp oldstamp
                                     thisYearsList = dropWhile (<= (m, d)) seasonDates
@@ -125,3 +132,10 @@ getCalendarTupleFromTimestamp = toGregorian
                               . utctDay
                               . posixSecondsToUTCTime
                               . fromIntegral
+
+ppSeconds :: (Integral i, Show i) => i -> String
+ppSeconds s =  show (s `div` 3600)
+            ++ ":"
+            ++ show ((s `mod` 3600) `div` 60)
+            ++ ":"
+            ++ show ((s `mod` 3600) `mod` 60) -- I know the first mod is useless.
