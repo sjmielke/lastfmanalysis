@@ -31,18 +31,26 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           
           now <- fmap round getPOSIXTime
           
-          -- {-
-          let getText ((start, end), allseconds) = let intToTimeString = show
-                                                                       . posixSecondsToUTCTime
-                                                                       . fromIntegral
-                                                   in putStrLn $  (intToTimeString start)
-                                                               ++ " - "
-                                                               ++ (intToTimeString end)
-                                                               ++ " -> "
-                                                               ++ (show $ allseconds `div` 3600)
+          let intToTimeString = show
+                              . posixSecondsToUTCTime
+                              . fromIntegral
+          let getText f ((start, end), val) = putStrLn $  (intToTimeString start)
+                                                       ++ " - "
+                                                       ++ (intToTimeString end)
+                                                       ++ " -> "
+                                                       ++ (f val)
+          
+          {-
           let filteredScrobbleList = filter (\(x, _) -> artist x == "Pat Metheny Group") scrobblesWithLength
           let lengths = getMonthLengths now filteredScrobbleList
-          mapM_ getText lengths
+          mapM_ (getText $ show . (`div` 3600)) lengths
           -- -}
+          
+          mapM_ (getText show) $ getHypedArtistsPerFrom now
+                                                        (7 * 24 * 3600)
+                                                        (2 * 3600)
+                                                        0.3
+                                                        scrobblesWithLength
+          
           
           SQL.close conn

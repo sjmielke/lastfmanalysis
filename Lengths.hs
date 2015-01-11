@@ -2,6 +2,7 @@
 
 module Lengths (
       getTrackLength
+    , getHypedArtistsPerFrom
     , getMonthLengths
     , getSeasonLengths
     , ppSeconds
@@ -9,7 +10,9 @@ module Lengths (
 
 import LastFM
 
-import Data.List (genericLength, group, sort, sortBy)
+import Control.Arrow (second)
+import Data.List (genericLength, group, groupBy, sort, sortBy)
+import Data.Maybe (listToMaybe)
 import Data.Ord (comparing)
 import Data.String (fromString)
 import Data.Time.Calendar (fromGregorian, toGregorian)
@@ -85,6 +88,32 @@ applyFunctionPerFrom f nextFunc firstFunc now scrobbleList = zip intervals value
 
 getLengthsPerFrom :: (Int -> Int) -> ([(Scrobble, Int)] -> Int) -> Int -> [(Scrobble, Int)] -> [((Int, Int), Int)]
 getLengthsPerFrom = applyFunctionPerFrom (sum . map snd)
+
+getHypedArtistsPerFrom :: Int                          -- ^ Timestamp of today (end of analysis)
+                       -> Int                          -- ^ interval between timeframes
+                       -> Int                          -- ^ the total listening time it takes for a artist to be hyped
+                       -> Double                       -- ^ the share an artist needs from the total listening time to be hyped
+                       -> [(Scrobble, Int)]            -- ^ all scrobbles
+                       -> [((Int, Int), Maybe (String, Double))] -- ^ list of tuples with first start and end and second the artist and its share, if one exists
+getHypedArtistsPerFrom now timeDiff significantLength significantRatio =
+        applyFunctionPerFrom getHypedArtist
+                             (+ timeDiff)
+                             (timestamp . fst . last)
+                             now
+    where getHypedArtist :: [(Scrobble, Int)] -> Maybe (String, Double)
+          getHypedArtist ss = listToMaybe
+                            -- here we have [Maybe (artist, ratio)]
+                            . filter ((>significantRatio) . snd)
+                            . map (second $ ( / (fromIntegral $ sum $ map snd ss) )
+                                          . fromIntegral )
+                            . take 1
+                            . reverse
+                            . sortBy (comparing snd)
+                            . filter ((>significantLength) . snd)
+                            -- here we have [("artist", artistLength)]
+                            . map (\xs -> (artist . fst $ head xs, sum $ map snd xs))
+                            . partitionWithAttribute (artist . fst)
+                            $ ss
 
 getMonthLengths :: Int -> [(Scrobble, Int)] -> [((Int, Int), Int)]
 getMonthLengths = getLengthsPerFrom nextMonth (timestamp . fst . last)
