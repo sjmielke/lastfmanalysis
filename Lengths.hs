@@ -3,6 +3,7 @@
 module Lengths (
       getTrackLength
     , getHypedArtistsPerFrom
+    , getLengthsPerFrom
     , getMonthLengths
     , getSeasonLengths
     , ppSeconds
