@@ -20,7 +20,7 @@ main = do let lastChristmas = 1387497600
           let albums :: [[Scrobble]]
               albums = partitionWithAttribute album realNewScrobbles
           
-          writeFile "/home/sjm/downloads/realnewtracks" $ printBeautifully $ map (\a -> (album $ head a, map title a)) albums
+          writeFile "realnewtracks" $ printBeautifully $ map (\a -> (album $ head a, map title a)) albums
 
 printBeautifully :: [(String, [String])] -> String
 printBeautifully = concatMap printSingle

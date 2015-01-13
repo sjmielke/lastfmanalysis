@@ -66,10 +66,10 @@ scrobbleList = do {- Retrieving data takes far too long, so...
                   con <- LFM.newConnection
                   scrobbleList <- fmap concat $ mapM (getScrobblePage con userName "e38cc7822bd7476fe4083e36ee69748e") [1..111]
                   
-                  writeFile "/home/sjm/scrobblelist" $ show scrobbleList
+                  writeFile "scrobblelist" $ show scrobbleList
                   
                   -- load the scrobblelist from a file \o/ -}
-                  fmap read $ readFile "/home/sjm/downloads/scrobblelist"
+                  fmap read $ readFile "scrobblelist"
 
 -- General utility stuff.
 partitionWithAttribute :: (Ord b) => (a -> b) -> [a] -> [[a]]

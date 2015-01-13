@@ -18,10 +18,10 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
           -- Yay for more manual caching.
           {-
           scrobblesWithLength <- fmap (zip scrobbleList) $ mapM (getTrackLength conn) scrobbleList
-          writeFile "/home/sjm/downloads/scrobblelistlengths" $ show scrobblesWithLength
+          writeFile "scrobblelistlengths" $ show scrobblesWithLength
           -- -}
           
-          scrobblesWithLength <- fmap read $ readFile "/home/sjm/downloads/scrobblelistlengths"
+          scrobblesWithLength <- fmap read $ readFile "scrobblelistlengths"
           
           putStrLn "Retrieved lengths."
           
@@ -66,9 +66,11 @@ main = do conn <- SQL.open "/home/sjm/.config/Clementine/clementine.db"
                                        )
                                        allEverHypedArtists
           
+          {-
           mapM_ (getText $ show . (`div` 3600)) $ fromJust
                                                 $ lookup "World's End Girlfriend"
                                                 $ artistProgressions
+          -- -}
           
           let generateTSV (a, intervals) =  a
                                         ++ "\t"
