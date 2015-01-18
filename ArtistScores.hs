@@ -54,7 +54,7 @@ getArtistProgressions = do
     scrobbleList <- scrobbleList
     
     -- Yay for more manual caching.
-    {-
+    --{-
     scrobblesWithLength <- fmap (zip scrobbleList) $ mapM (getTrackLength conn) scrobbleList
     writeFile "scrobblelistlengths" $ show scrobblesWithLength
     -- -}

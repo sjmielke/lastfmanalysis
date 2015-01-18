@@ -59,17 +59,26 @@ getScrobblePage con userName apiKey page = do
         return $ filter ((/=42) . timestamp) scrobbleList
 
 scrobbleList :: IO [Scrobble]
-scrobbleList = do {- Retrieving data takes far too long, so...
+scrobbleList = do --{- Retrieving data takes far too long, so...
                   putStr "User name: "
                   userName <- fmap pack getLine
                   
                   con <- LFM.newConnection
-                  scrobbleList <- fmap concat $ mapM (getScrobblePage con userName "e38cc7822bd7476fe4083e36ee69748e") [1..111]
+                  scrobbleList <- getPages con userName [] [1..]
                   
                   writeFile "scrobblelist" $ show scrobbleList
                   
                   -- load the scrobblelist from a file \o/ -}
                   fmap read $ readFile "scrobblelist"
+    where getPages con userName prev (i:is) =
+                do page <- getScrobblePage con
+                                           userName
+                                           "e38cc7822bd7476fe4083e36ee69748e"
+                                           i
+                   if page == prev
+                   then return prev
+                   else do rest <- getPages con userName page is 
+                           return $ prev ++ rest
 
 -- General utility stuff.
 partitionWithAttribute :: (Ord b) => (a -> b) -> [a] -> [[a]]
